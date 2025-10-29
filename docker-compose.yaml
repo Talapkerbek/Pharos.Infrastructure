@@ -1,0 +1,144 @@
+name: "TalapkerDevInfra"
+
+services:
+    postgresDb:
+        image: "postgres"
+        container_name: "talapker-postgres"
+        environment:
+            POSTGRES_USER: "postgres"
+            POSTGRES_PASSWORD: "postgres"
+        ports:
+            - "5432:5432"
+        volumes:
+            - "talapker_postgres_data:/var/lib/postgresql/data"
+            - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U openfga"]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    pgadmin:
+        image: dpage/pgadmin4
+        container_name: talapker-pgadmin
+        environment:
+            PGADMIN_DEFAULT_EMAIL: "admin@gmail.com"
+            PGADMIN_DEFAULT_PASSWORD: "admin@gmail.com"
+        ports:
+        - "5050:80"
+        depends_on:
+        - postgresDb
+        volumes:
+        - talapker_pgadmin_data:/var/lib/pgadmin
+
+    kafka:
+        image: apache/kafka:latest
+        container_name: broker
+        environment:
+            KAFKA_NODE_ID: 1
+            KAFKA_PROCESS_ROLES: broker,controller
+            KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+            KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092,EXTERNAL://localhost:9094
+            KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+            KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
+            KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+            KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+            KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+            KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+        ports:
+        - "9094:9094"
+        volumes:
+        - "talapker_kafka_data:/var/lib/kafka/data"
+        healthcheck:
+            test:
+                [
+                "CMD-SHELL",
+                "./opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1",
+                ]
+            interval: 10s
+            timeout: 10s
+            retries: 5
+
+    kafka-ui:
+        image: provectuslabs/kafka-ui
+        container_name: kafka-ui
+        ports:
+        - "8088:8080"
+        environment:
+            KAFKA_CLUSTERS_0_NAME: local
+            KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: broker:9092
+            KAFKA_CLUSTERS_0_READONLY: "false"
+        depends_on:
+            kafka:
+                condition: service_healthy
+
+    elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:9.1.4
+        container_name: elasticsearch
+        environment:
+        - discovery.type=single-node
+        - xpack.security.enabled=false
+        - xpack.security.http.ssl.enabled=false
+        - ELASTIC_PASSWORD=elasticpassword
+        - ES_JAVA_OPTS=-Xms1g -Xmx1g
+        - xpack.security.enrollment.enabled=false
+        ports:
+        - "9200:9200"
+        volumes:
+        - es_data:/usr/share/elasticsearch/data
+        networks:
+        - elastic
+
+    kibana:
+        image: docker.elastic.co/kibana/kibana:9.1.4
+        container_name: kibana
+        depends_on:
+        - elasticsearch
+        environment:
+        - DISABLE_INITIAL_SETUP=true
+        - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+        - ELASTICSEARCH_USERNAME=kibana_user
+        - ELASTICSEARCH_PASSWORD=kibana_password
+        - DISABLE_INITIAL_SETUP=true
+        - xpack.security.enrollment.enabled=false
+        ports:
+        - "5601:5601"
+        networks:
+        - elastic
+
+    openfga-migrate:
+        image: openfga/openfga:latest
+        container_name: openfga-migrate
+        depends_on:
+            postgresDb:
+                condition: service_healthy
+        environment:
+            OPENFGA_DATASTORE_ENGINE: postgres
+            OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgresDb:5432/authz?sslmode=disable
+        command: migrate
+        restart: "no"
+
+    openfga:
+        image: openfga/openfga:latest
+        container_name: openfga
+        depends_on:
+            openfga-migrate:
+                condition: service_completed_successfully
+        environment:
+            OPENFGA_DATASTORE_ENGINE: postgres
+            OPENFGA_DATASTORE_URI: postgres://postgres:postgres@postgresDb:5432/authz?sslmode=disable
+            OPENFGA_LOG_LEVEL: info
+            OPENFGA_PLAYGROUND_ENABLED: "true"
+        command: run
+        ports:
+        - "8080:8080"   
+        - "8081:3000"   
+
+volumes:
+    talapker_postgres_data:
+    talapker_kafka_data:
+    talapker_pgadmin_data:
+    es_data:
+
+networks:
+    elastic:
