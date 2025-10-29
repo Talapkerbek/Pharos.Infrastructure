@@ -10,9 +10,10 @@ services:
         ports:
             - "5432:5432"
         volumes:
-            - "talapker_postgres_data:/var/lib/postgresql"
+            - "./volumes/postgres_data:/var/lib/postgresql/data"
+            - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
         healthcheck:
-            test: [ "CMD-SHELL", "pg_isready -U openfga" ]
+            test: ["CMD-SHELL", "pg_isready -U openfga"]
             interval: 5s
             timeout: 5s
             retries: 10
@@ -47,7 +48,7 @@ services:
         ports:
         - "9094:9094"
         volumes:
-        - "talapker_kafka_data:/var/lib/kafka/data"
+        - "./volumes/kafka_data:/var/lib/kafka/data"
         healthcheck:
             test:
                 [
@@ -84,7 +85,7 @@ services:
         ports:
         - "9200:9200"
         volumes:
-        - es_data:/usr/share/elasticsearch/data
+        - ./volumes/es_data:/usr/share/elasticsearch/data
         networks:
         - elastic
 
@@ -134,10 +135,7 @@ services:
         - "8081:3000"   
 
 volumes:
-    talapker_postgres_data:
-    talapker_kafka_data:
     talapker_pgadmin_data:
-    es_data:
 
 networks:
     elastic:
